@@ -50,7 +50,12 @@
                 </div>
                 <div class="space-y-1.5">
                     <label for="auth-password" class="text-xs text-slate-400 font-semibold">Senha</label>
-                    <input id="auth-password" type="password" autocomplete="current-password" class="w-full bg-cyber-bg border border-cyber-border rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-cyber-cyan" placeholder="••••••••">
+                    <div class="relative">
+                        <input id="auth-password" type="password" autocomplete="current-password" class="w-full bg-cyber-bg border border-cyber-border rounded-xl px-4 py-3 pr-12 text-sm text-white outline-none focus:border-cyber-cyan" placeholder="••••••••">
+                        <button id="auth-password-toggle" type="button" onclick="togglePasswordVisibility()" class="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 inline-flex items-center justify-center rounded-lg border border-cyber-border bg-cyber-card/60 text-slate-400 hover:text-cyber-cyan hover:border-cyber-cyan/40">
+                            <i id="auth-password-toggle-icon" data-lucide="eye" class="w-4 h-4"></i>
+                        </button>
+                    </div>
                 </div>
                 <p id="auth-login-error" class="text-xs text-cyber-down min-h-[18px]"></p>
                 <button id="auth-submit-btn" type="submit" class="w-full rounded-xl border border-cyber-cyan/30 bg-cyber-cyan/10 text-cyber-cyan font-black py-3 text-sm tracking-wide">ENTRAR</button>

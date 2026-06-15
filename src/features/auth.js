@@ -120,6 +120,24 @@ function isRestrictedPanel() {
     return runtimeConfig.panelAccessMode === "restricted";
 }
 
+export function togglePasswordVisibility() {
+    const input = document.getElementById("auth-password");
+    const icon = document.getElementById("auth-password-toggle-icon");
+    if (!input) {
+        return;
+    }
+
+    const isHidden = input.type === "password";
+    input.type = isHidden ? "text" : "password";
+    if (icon) {
+        icon.setAttribute("data-lucide", isHidden ? "eye-off" : "eye");
+    }
+
+    if (typeof window?.lucide?.createIcons === "function") {
+        window.lucide.createIcons();
+    }
+}
+
 async function readErrorBody(response) {
     const contentType = response.headers.get("content-type") || "";
     try {
@@ -160,6 +178,25 @@ async function invokeEdgeFunction(functionName, payload, accessToken = "") {
     }
 
     return response.json();
+}
+
+function normalizeAccessError(error) {
+    const raw = error instanceof Error ? error.message : String(error || "");
+    const message = raw || "Falha ao comunicar com o backend restrito.";
+
+    if (message.includes("Failed to fetch") || message.includes("NetworkError")) {
+        return "Falha ao acessar as funções do Supabase (CORS ou funções não publicadas).";
+    }
+
+    if (message.includes("(404)")) {
+        return "Funções do Supabase não encontradas (deploy pendente).";
+    }
+
+    if (message.includes("Origem não autorizada")) {
+        return "Origem do painel não autorizada no Supabase. Ajuste ALLOWED_ORIGINS/PANEL_URL.";
+    }
+
+    return message;
 }
 
 async function postAuditEvent(payload, accessToken = "") {
@@ -212,14 +249,19 @@ async function loadOperatorContext(session) {
 
 async function handleAuthBootstrapFailure(message) {
     const supabase = getSupabaseClient();
-    if (supabase && state.auth.session) {
+    const safeMessage = normalizeAccessError(message);
+    if (
+        supabase
+        && state.auth.session
+        && (safeMessage.includes("Sessão inválida") || safeMessage.includes("Origem do painel"))
+    ) {
         try {
             await supabase.auth.signOut();
         } catch {}
     }
 
-    applyBlockingAuthError(message);
-    showToast(message, "error");
+    applyBlockingAuthError(safeMessage);
+    showToast(safeMessage, "error");
 }
 
 async function handleAuthenticatedSession(session) {
@@ -230,7 +272,18 @@ async function handleAuthenticatedSession(session) {
         user: session?.user || null,
         lastError: ""
     });
-    await loadOperatorContext(session);
+
+    try {
+        await loadOperatorContext(session);
+    } catch (error) {
+        const safeMessage = normalizeAccessError(error);
+        state.auth.profile = null;
+        state.supabaseSync.status = "offline";
+        state.supabaseSync.lastError = safeMessage;
+        applyAuthState("authenticated", { lastError: safeMessage });
+        showToast(safeMessage, "warning");
+    }
+
     updateAuthUi();
     showToast("Operador autenticado com sucesso.", "success");
     await authCallbacks.onAuthenticated();
@@ -274,7 +327,7 @@ export async function initializeAuthFlow(callbacks = {}) {
             await handleSignedOutState();
         }
     } catch (error) {
-        await handleAuthBootstrapFailure(error instanceof Error ? error.message : "Falha ao inicializar o painel restrito.");
+        await handleAuthBootstrapFailure(error instanceof Error ? error : "Falha ao inicializar o painel restrito.");
     }
 
     supabase.auth.onAuthStateChange(async (event, session) => {
@@ -286,7 +339,7 @@ export async function initializeAuthFlow(callbacks = {}) {
 
             await handleAuthenticatedSession(session);
         } catch (error) {
-            await handleAuthBootstrapFailure(error instanceof Error ? error.message : "Falha ao validar o operador.");
+            await handleAuthBootstrapFailure(error instanceof Error ? error : "Falha ao validar o operador.");
         }
     });
 }
@@ -323,15 +376,16 @@ export async function signInOperator(event) {
 
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error || !data.session) {
+        const safeMessage = normalizeAccessError(error?.message || "Não foi possível autenticar o operador.");
         applyAuthState("error", {
-            lastError: error?.message || "Não foi possível autenticar o operador."
+            lastError: safeMessage
         });
         updateAuthUi();
         await postAuditEvent({
             action: "auth_sign_in_failure",
             status: "error",
             emailHint: email,
-            errorMessage: error?.message || "Falha desconhecida.",
+            errorMessage: safeMessage,
             description: "Falha de autenticação por email e senha.",
             origin: "web-auth",
             originContext: "login-form",

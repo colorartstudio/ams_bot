@@ -27,7 +27,7 @@ import {
     startWebSocketPriceMock,
     stopWebSocketPriceMock
 } from "../features/dashboard.js";
-import { initializeAuthFlow, signInOperator, signOutOperator } from "../features/auth.js";
+import { initializeAuthFlow, signInOperator, signOutOperator, togglePasswordVisibility } from "../features/auth.js";
 import { loadRuntimeConfig, runtimeConfig } from "../config/runtime.js";
 import { renderFimatheChart } from "../services/charts.js";
 import { hydrateAppState, persistAppState } from "../services/storage.js";
@@ -62,6 +62,7 @@ function exposeGlobals() {
     window.sendQuestionToCopilot = (question) => sendQuestionToCopilot(question, switchTab);
     window.signInOperator = signInOperator;
     window.signOutOperator = signOutOperator;
+    window.togglePasswordVisibility = togglePasswordVisibility;
 }
 
 let runtimeStarted = false;
