@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AMS - Bybit & HftBacktest Client Manager</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js para Curva de Patrimônio e Indicadores -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        cyber: {
+                            bg: '#020406',
+                            card: '#060a12',
+                            border: '#11192b',
+                            cyan: '#00f0ff',
+                            cyanDark: '#00b8c4',
+                            purple: '#9d4edd',
+                            purpleDark: '#7b2cbf',
+                            up: '#10b981',
+                            down: '#f43f5e',
+                            warning: '#fbbf24',
+                            darkGray: '#111827'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="./styles/main.css">
+</head>
+<body class="text-slate-100 min-h-screen flex flex-col">
+    <div id="auth-overlay" class="fixed inset-0 z-[70] bg-cyber-bg/95 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="w-full max-w-md rounded-2xl border border-cyber-border bg-cyber-card p-6 space-y-5 shadow-2xl">
+            <div class="space-y-2">
+                <span class="text-[10px] uppercase tracking-[0.25em] text-cyber-cyan font-bold">Acesso do Operador</span>
+                <h2 class="text-2xl font-black text-white font-display">Autenticação AMS</h2>
+                <p class="text-sm text-slate-400">Entre com email e senha para liberar leitura, escrita e auditoria por operador.</p>
+            </div>
+            <form onsubmit="signInOperator(event)" class="space-y-4">
+                <div class="space-y-1.5">
+                    <label for="auth-email" class="text-xs text-slate-400 font-semibold">Email</label>
+                    <input id="auth-email" type="email" autocomplete="username" class="w-full bg-cyber-bg border border-cyber-border rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-cyber-cyan" placeholder="operador@ams.local">
+                </div>
+                <div class="space-y-1.5">
+                    <label for="auth-password" class="text-xs text-slate-400 font-semibold">Senha</label>
+                    <input id="auth-password" type="password" autocomplete="current-password" class="w-full bg-cyber-bg border border-cyber-border rounded-xl px-4 py-3 text-sm text-white outline-none focus:border-cyber-cyan" placeholder="••••••••">
+                </div>
+                <p id="auth-login-error" class="text-xs text-cyber-down min-h-[18px]"></p>
+                <button id="auth-submit-btn" type="submit" class="w-full rounded-xl border border-cyber-cyan/30 bg-cyber-cyan/10 text-cyber-cyan font-black py-3 text-sm tracking-wide">ENTRAR</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Header / Barra Superior de Controle de Fluxo -->
+    <nav class="border-b border-cyber-border bg-cyber-card/90 backdrop-blur-md sticky top-0 z-50 px-4 md:px-6 py-4">
+        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="text-cyber-cyan font-black text-2xl tracking-wider flex items-center gap-2 font-display">
+                    <span class="bg-gradient-to-r from-cyber-cyan to-cyber-purple bg-clip-text text-transparent">AMS</span>
+                    <span class="text-[9px] bg-cyber-cyan/10 text-cyber-cyan px-2.5 py-0.5 rounded-full border border-cyber-cyan/30 tracking-widest font-sans font-bold">Aegis Micro-Scalper</span>
+                </div>
+            </div>
+
+            <!-- Navegador de Seções - Responsivo -->
+            <div class="flex items-center overflow-x-auto w-full md:w-auto gap-4 py-1 text-xs md:text-sm font-medium text-slate-400 border-t border-cyber-border/40 md:border-none">
+                <button id="tab-btn-dashboard" onclick="switchTab('dashboard')" class="text-cyber-cyan border-b-2 border-cyber-cyan pb-1 flex items-center gap-1.5 transition-all shrink-0"><i data-lucide="layout-dashboard" class="w-4 h-4"></i> Dashboard AMS</button>
+                <button id="tab-btn-backtest" onclick="switchTab('backtest')" class="hover:text-cyber-cyan flex items-center gap-1.5 transition-all shrink-0"><i data-lucide="history" class="w-4 h-4"></i> Simulação HftBacktest</button>
+                <button id="tab-btn-copilot" onclick="switchTab('copilot')" class="hover:text-cyber-cyan flex items-center gap-1.5 transition-all shrink-0 relative">
+                    <i data-lucide="brain-circuit" class="w-4 h-4"></i> Copilot IA
+                    <span class="absolute -top-2 -right-3 w-1.5 h-1.5 bg-cyber-purple rounded-full pulse-hft"></span>
+                </button>
+                <button id="tab-btn-code" onclick="switchTab('code')" class="hover:text-cyber-cyan flex items-center gap-1.5 transition-all shrink-0"><i data-lucide="code-2" class="w-4 h-4"></i> Códigos de Produção</button>
+            </div>
+
+            <!-- Modos de Rede e Status -->
+            <div class="flex items-center gap-2 md:gap-3 ml-auto md:ml-0">
+                <div class="flex items-center gap-2">
+                    <span id="operator-auth-badge" class="px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-mono border border-cyber-warning/30 bg-cyber-warning/10 text-cyber-warning">OPERADOR DESCONECTADO</span>
+                    <button id="operator-logout-btn" onclick="signOutOperator()" class="hidden px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-bold border border-cyber-down/30 bg-cyber-down/10 text-cyber-down hover:bg-cyber-down/20">SAIR</button>
+                </div>
+                <div class="flex items-center gap-1 bg-cyber-bg p-1 rounded-lg border border-cyber-border text-[10px] md:text-xs">
+                    <button id="net-testnet-btn" onclick="setNetwork('testnet')" class="bg-cyber-cyan/20 text-cyber-cyan px-2.5 py-1.5 rounded-md font-bold transition-all border border-cyber-cyan/20">TESTNET</button>
+                    <button id="net-live-btn" onclick="setNetwork('live')" class="text-slate-400 hover:text-slate-200 px-2.5 py-1.5 rounded-md transition-all font-semibold">LIVE NET</button>
+                </div>
+                <div class="flex items-center gap-1.5 bg-cyber-bg px-2.5 py-1.5 rounded-lg border border-cyber-border text-[10px] md:text-xs font-mono">
+                    <span class="w-2 h-2 bg-cyber-up rounded-full pulse-hft"></span>
+                    <span id="network-status-text" class="text-cyber-up font-semibold">Bybit Connected</span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Notificação de Modo Testnet/Simulado Ativo -->
+    <div class="bg-gradient-to-r from-cyber-cyan/20 to-cyber-purple/10 border-b border-cyber-cyan/30 py-2.5 px-4 md:px-6 text-center text-[10px] md:text-xs text-cyber-cyan font-medium">
+        <span class="inline-flex items-center gap-2">
+            <i data-lucide="shield-check" class="w-4 h-4 text-cyber-cyan animate-pulse"></i>
+            AMS Client Protocol: Alocação individualizada por conta, execução de ordens via <strong>Limit (Maker)</strong> nas paridades BRL, USDT e USDC.
+        </span>
+    </div>
+
+    <!-- Conteúdo Principal -->
+    <main class="flex-grow p-4 md:p-6 max-w-7xl w-full mx-auto font-sans">
+
+        <!-- ================= ABA 1: TERMINAL DE OPERAÇÕES REAL-TIME (DASHBOARD) ================= -->
+        <section id="tab-dashboard" class="space-y-6">
+            <section class="bg-cyber-card p-4 rounded-2xl border border-cyber-border flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h2 class="text-sm font-black text-white font-display">Contexto do Operador</h2>
+                    <p class="text-xs text-slate-400 font-mono">Sessão autenticada obrigatória para `invoke`, auditoria e isolamento por perfil.</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 text-xs font-mono">
+                    <span class="px-3 py-1.5 rounded-lg border border-cyber-border bg-cyber-bg text-slate-300">Email: <strong id="operator-email-label" class="text-cyber-cyan">Sessão não autenticada</strong></span>
+                    <span class="px-3 py-1.5 rounded-lg border border-cyber-border bg-cyber-bg text-slate-300">Papel: <strong id="operator-role-label" class="text-cyber-purple">--</strong></span>
+                </div>
+            </section>
+
+            <section id="general-semaphore-panel" class="bg-cyber-card p-5 md:p-6 rounded-2xl border border-cyber-warning/40 space-y-4">
+                <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-5">
+                    <div class="space-y-3">
+                        <div class="flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-slate-500 font-bold">
+                            <i data-lucide="activity" class="w-4 h-4 text-cyber-cyan"></i>
+                            <span>Semáforo de Tendência Geral</span>
+                        </div>
+                        <div class="space-y-2">
+                            <h1 class="text-2xl md:text-3xl font-black text-white font-display">Terminal de Alta Performance Aegis</h1>
+                            <p id="general-semaphore-state" class="text-xl md:text-2xl font-black font-display text-cyber-warning">TENDENCIA EM OBSERVACAO (AMARELO)</p>
+                            <p id="general-semaphore-description" class="text-sm text-slate-300 max-w-3xl">A leitura geral ainda esta consolidando confluencia. O motor segue seletivo, monitorando risco e eficiencia.</p>
+                        </div>
+                        <div class="flex flex-wrap gap-3 text-xs font-mono">
+                            <span class="px-3 py-1.5 rounded-full border border-cyber-border bg-cyber-bg text-slate-300">Par atual: <strong id="general-semaphore-market" class="text-cyber-cyan">SOL/USDT</strong></span>
+                            <span class="px-3 py-1.5 rounded-full border border-cyber-border bg-cyber-bg text-slate-300">Modo: <strong id="general-semaphore-network" class="text-cyber-purple">TESTNET</strong></span>
+                            <span class="px-3 py-1.5 rounded-full border border-cyber-border bg-cyber-bg text-slate-300">Melhor conta: <strong id="sim-best-account" class="text-cyber-up">Banca_Micro_Mestre</strong></span>
+                            <span class="px-3 py-1.5 rounded-full border border-cyber-border bg-cyber-bg text-slate-300">Fonte: <strong id="general-market-source" class="text-cyber-cyan">Bootstrap</strong></span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3 xl:min-w-[370px]">
+                        <div class="rounded-2xl border border-cyber-border bg-cyber-bg/80 p-4">
+                            <span class="text-[10px] uppercase tracking-wider text-slate-500 block">Eficiência do Bot</span>
+                            <span id="general-efficiency" class="text-2xl font-black text-cyber-cyan font-display">0.0%</span>
+                        </div>
+                        <div class="rounded-2xl border border-cyber-border bg-cyber-bg/80 p-4">
+                            <span class="text-[10px] uppercase tracking-wider text-slate-500 block">Profit Factor</span>
+                            <span id="general-profit-factor" class="text-2xl font-black text-cyber-cyan font-display">0.00</span>
+                        </div>
+                        <div class="col-span-2 rounded-2xl border border-cyber-border bg-cyber-bg/80 p-4 flex items-center justify-between gap-4">
+                            <div class="space-y-2">
+                                <span class="text-[10px] uppercase tracking-wider text-slate-500 block">Painel Luminoso</span>
+                                <div class="flex items-center gap-4">
+                                    <div class="flex flex-col items-center gap-1">
+                                        <div id="general-light-green" class="w-5 h-5 rounded-full bg-emerald-950"></div>
+                                        <span class="text-[9px] text-slate-500">ALTA</span>
+                                    </div>
+                                    <div class="flex flex-col items-center gap-1">
+                                        <div id="general-light-yellow" class="w-5 h-5 rounded-full bg-yellow-500 glow-yellow"></div>
+                                        <span class="text-[9px] text-slate-500">LATERAL</span>
+                                    </div>
+                                    <div class="flex flex-col items-center gap-1">
+                                        <div id="general-light-red" class="w-5 h-5 rounded-full bg-red-950"></div>
+                                        <span class="text-[9px] text-slate-500">QUEDA</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="text-right text-xs font-mono">
+                                <span class="text-slate-500 block">Contas Ativas</span>
+                                <span id="sim-active-accounts" class="text-white text-lg font-bold">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="bg-cyber-card p-4 md:p-5 rounded-2xl border border-cyber-border space-y-4">
+                <div class="flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                        <h2 class="text-lg font-black font-display text-white">Camada Supabase</h2>
+                        <p class="text-xs text-slate-400 font-mono">Persistência real de snapshots, ciclos, trades simulados e métricas agregadas.</p>
+                    </div>
+                    <span id="supabase-sync-status" class="px-3 py-1 rounded-full text-xs font-bold border border-cyber-border text-slate-300 bg-cyber-bg">OFFLINE</span>
+                </div>
+                <div class="grid md:grid-cols-4 gap-3 text-xs font-mono">
+                    <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-3">
+                        <span class="text-slate-500 block">Última Escrita</span>
+                        <span id="supabase-last-write" class="text-white font-bold">--</span>
+                    </div>
+                    <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-3">
+                        <span class="text-slate-500 block">Última Leitura</span>
+                        <span id="supabase-last-read" class="text-white font-bold">--</span>
+                    </div>
+                    <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-3">
+                        <span class="text-slate-500 block">Ciclos Remotos</span>
+                        <span id="supabase-cycle-count" class="text-cyber-cyan font-bold">0</span>
+                    </div>
+                    <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-3">
+                        <span class="text-slate-500 block">Trades Remotos</span>
+                        <span id="supabase-trade-count" class="text-cyber-cyan font-bold">0</span>
+                    </div>
+                </div>
+                <div class="grid md:grid-cols-3 gap-3 text-xs">
+                    <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-3">
+                        <span class="text-slate-500 block mb-1">Último Ciclo</span>
+                        <span id="supabase-latest-cycle" class="text-white font-mono">Aguardando dados remotos.</span>
+                    </div>
+                    <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-3">
+                        <span class="text-slate-500 block mb-1">Último Trade</span>
+                        <span id="supabase-latest-trade" class="text-white font-mono">Aguardando dados remotos.</span>
+                    </div>
+                    <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-3">
+                        <span class="text-slate-500 block mb-1">Último Snapshot</span>
+                        <span id="supabase-latest-snapshot" class="text-white font-mono">Aguardando dados remotos.</span>
+                    </div>
+                </div>
+                <div class="rounded-xl border border-cyber-border bg-cyber-bg/50 p-3">
+                    <span class="text-slate-500 block mb-1 text-xs">Status Técnico</span>
+                    <span id="supabase-last-error" class="text-[11px] text-slate-500 font-mono">Sem erros recentes na camada remota.</span>
+                </div>
+            </section>
+
+            <section class="bg-cyber-card p-4 md:p-5 rounded-2xl border border-cyber-border space-y-5">
+                <div class="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+                    <div>
+                        <h2 class="text-lg font-black font-display text-white">Inteligência Histórica no Banco</h2>
+                        <p class="text-xs text-slate-400 font-mono">Leitura agregada via Edge Function com visão operacional por período, conta e par.</p>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button id="history-period-1h" onclick="changeDashboardHistoryRange('1h')" class="px-3 py-1.5 rounded-lg text-[11px] font-bold border border-cyber-border bg-cyber-bg text-slate-400 hover:text-slate-200">1H</button>
+                        <button id="history-period-24h" onclick="changeDashboardHistoryRange('24h')" class="px-3 py-1.5 rounded-lg text-[11px] font-bold border border-cyber-cyan/30 bg-cyber-cyan/10 text-cyber-cyan">24H</button>
+                        <button id="history-period-7d" onclick="changeDashboardHistoryRange('7d')" class="px-3 py-1.5 rounded-lg text-[11px] font-bold border border-cyber-border bg-cyber-bg text-slate-400 hover:text-slate-200">7D</button>
+                        <button id="history-period-30d" onclick="changeDashboardHistoryRange('30d')" class="px-3 py-1.5 rounded-lg text-[11px] font-bold border border-cyber-border bg-cyber-bg text-slate-400 hover:text-slate-200">30D</button>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between gap-3 text-xs font-mono bg-cyber-bg/50 border border-cyber-border rounded-xl p-3">
+                    <span class="text-slate-400">Janela ativa: <strong id="history-period-label" class="text-cyber-cyan">Últimas 24 horas</strong></span>
+                    <span class="text-slate-500">Gerado em: <strong id="history-generated-at" class="text-white">--</strong></span>
+                </div>
+
+                <div class="grid md:grid-cols-5 gap-3 text-xs font-mono">
+                    <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-3">
+                        <span class="text-slate-500 block">Ciclos no Período</span>
+                        <span id="history-cycle-total" class="text-white text-lg font-black">0</span>
+                    </div>
+                    <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-3">
+                        <span class="text-slate-500 block">Trades no Período</span>
+                        <span id="history-trade-total" class="text-white text-lg font-black">0</span>
+                    </div>
+                    <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-3">
+                        <span class="text-slate-500 block">PnL do Período</span>
+                        <span id="history-period-pnl" class="text-lg font-black text-cyber-up font-mono">+USDT 0.00</span>
+                    </div>
+                    <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-3">
+                        <span class="text-slate-500 block">Win Rate Médio</span>
+                        <span id="history-period-win-rate" class="text-white text-lg font-black">0.0%</span>
+                    </div>
+                    <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-3">
+                        <span class="text-slate-500 block">Delta de Patrimônio</span>
+                        <span id="history-period-equity-delta" class="text-lg font-black text-cyber-up font-mono">+USDT 0.00</span>
+                    </div>
+                </div>
+
+                <div class="grid xl:grid-cols-3 gap-4">
+                    <div class="xl:col-span-2 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-sm font-bold text-white font-display">Cards de Performance por Conta</h3>
+                            <span class="text-[10px] text-slate-500 font-mono">Ranking tático multicontas</span>
+                        </div>
+                        <div id="account-performance-list" class="grid md:grid-cols-2 gap-3">
+                            <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-4 text-xs text-slate-500">Aguardando dados históricos do período selecionado.</div>
+                        </div>
+                    </div>
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-sm font-bold text-white font-display">Ranking Multicontas</h3>
+                            <span class="text-[10px] text-slate-500 font-mono">PnL + eficiência</span>
+                        </div>
+                        <div id="ranking-list" class="space-y-2">
+                            <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-4 text-xs text-slate-500">Sem ranking disponível para o período atual.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-3">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-sm font-bold text-white font-display">Cards de Performance por Par</h3>
+                        <span class="text-[10px] text-slate-500 font-mono">Eficiência e resultado por símbolo</span>
+                    </div>
+                    <div id="pair-performance-list" class="grid md:grid-cols-2 xl:grid-cols-4 gap-3">
+                        <div class="rounded-xl border border-cyber-border bg-cyber-bg/70 p-4 text-xs text-slate-500">Aguardando dados históricos do período selecionado.</div>
+                    </div>
+                </div>
+
+                <div class="grid xl:grid-cols-2 gap-4">
+                    <div class="rounded-2xl border border-cyber-border bg-cyber-bg/40 p-4 space-y-3">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-sm font-bold text-white font-display">Curva de Patrimônio Global</h3>
+                            <span class="text-[10px] text-cyber-cyan font-mono">Banco consolidado</span>
+                        </div>
+                        <div class="h-64 relative">
+                            <canvas id="equityHistoryChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="rounded-2xl border border-cyber-border bg-cyber-bg/40 p-4 space-y-3">
+                        <div class="flex items-center justify-between gap-3 flex-wrap">
+                            <h3 class="text-sm font-bold text-white font-display">Curva por Conta</h3>
+                            <select id="account-curve-selector" onchange="changeDashboardAccountCurve(this.value)" class="bg-cyber-card border border-cyber-border rounded-lg px-3 py-1.5 text-[11px] text-cyber-cyan font-bold outline-none">
+                                <option value="">Sem histórico por conta</option>
+                            </select>
+                        </div>
+                        <div class="h-64 relative">
+                            <canvas id="accountEquityChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Linha de Mapeamento Temporal e Alinhamento Cascata -->
+            <div class="bg-cyber-card p-4 md:p-5 rounded-2xl border border-cyber-border space-y-4">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-cyber-border/60 pb-3">
+                    <div>
+                        <h2 class="text-base font-bold text-white flex items-center gap-2 font-display">
+                            Mapeamento Direcional por Cascata de Timeframes (Top-Down AMS)
+                        </h2>
+                        <p class="text-slate-400 text-xs">Varredura simultânea de tendências para bloqueio de operações desalinhadas com o mercado macro.</p>
+                    </div>
+                    <div class="flex items-center gap-2 text-xs bg-cyber-bg border border-cyber-border p-1.5 rounded-xl self-start md:self-auto">
+                        <span class="text-slate-500 font-bold uppercase pl-1">Ativo Principal:</span>
+                        <select id="asset-selector" onchange="changeAssetSymbol()" class="bg-transparent border-none text-cyber-cyan font-bold outline-none cursor-pointer">
+                            <option value="SOLUSDT" class="bg-cyber-card">SOL/USDT</option>
+                            <option value="XRPUSDT" class="bg-cyber-card">XRP/USDT</option>
+                            <option value="BTCUSDT" class="bg-cyber-card">BTC/USDT</option>
+                            <option value="ETHUSDT" class="bg-cyber-card">ETH/USDT</option>
+                            <option value="SOLUSDC" class="bg-cyber-card">SOL/USDC</option>
+                            <option value="XRPUSDC" class="bg-cyber-card">XRP/USDC</option>
+                            <option value="BTCUSDC" class="bg-cyber-card">BTC/USDC</option>
+                            <option value="ETHUSDC" class="bg-cyber-card">ETH/USDC</option>
+                            <option value="SOLBRL" class="bg-cyber-card">SOL/BRL</option>
+                            <option value="XRPBRL" class="bg-cyber-card">XRP/BRL</option>
+                            <option value="BTCBRL" class="bg-cyber-card">BTC/BRL</option>
+                            <option value="ETHBRL" class="bg-cyber-card">ETH/BRL</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Painel da Cascata de 8 Timeframes Requisitados -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 text-center text-xs">
+                    <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border">
+                        <span class="text-[10px] text-slate-500 font-bold block">1W (Semanal)</span>
+                        <span id="tf-status-1w" class="font-bold block mt-2 text-cyber-up bg-cyber-up/10 py-1 rounded border border-cyber-up/15 text-[10px] md:text-xs">ALTA</span>
+                    </div>
+                    <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border">
+                        <span class="text-[10px] text-slate-500 font-bold block">1D (Diário)</span>
+                        <span id="tf-status-1d" class="font-bold block mt-2 text-cyber-up bg-cyber-up/10 py-1 rounded border border-cyber-up/15 text-[10px] md:text-xs">ALTA</span>
+                    </div>
+                    <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border">
+                        <span class="text-[10px] text-slate-500 font-bold block">3H (Macro Intra)</span>
+                        <span id="tf-status-3h" class="font-bold block mt-2 text-cyber-warning bg-cyber-warning/10 py-1 rounded border border-cyber-warning/15 text-[10px] md:text-xs">NEUTRO</span>
+                    </div>
+                    <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border">
+                        <span class="text-[10px] text-slate-500 font-bold block">1H (Zonas Valor)</span>
+                        <span id="tf-status-1h" class="font-bold block mt-2 text-cyber-up bg-cyber-up/10 py-1 rounded border border-cyber-up/15 text-[10px] md:text-xs">ALTA</span>
+                    </div>
+                    <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border">
+                        <span class="text-[10px] text-slate-500 font-bold block">30m (Canais Sec)</span>
+                        <span id="tf-status-30m" class="font-bold block mt-2 text-cyber-down bg-cyber-down/10 py-1 rounded border border-cyber-down/15 text-[10px] md:text-xs">BAIXA</span>
+                    </div>
+                    <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border">
+                        <span class="text-[10px] text-slate-500 font-bold block">15m (Gatilho Base)</span>
+                        <span id="tf-status-15m" class="font-bold block mt-2 text-cyber-up bg-cyber-up/10 py-1 rounded border border-cyber-up/15 text-[10px] md:text-xs">ALTA</span>
+                    </div>
+                    <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border">
+                        <span class="text-[10px] text-slate-500 font-bold block">5m (Micro Mom)</span>
+                        <span id="tf-status-5m" class="font-bold block mt-2 text-cyber-up bg-cyber-up/10 py-1 rounded border border-cyber-up/15 text-[10px] md:text-xs">ALTA</span>
+                    </div>
+                    <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border">
+                        <span class="text-[10px] text-slate-500 font-bold block">1m (Liquidez)</span>
+                        <span id="tf-status-1m" class="font-bold block mt-2 text-cyber-up bg-cyber-up/10 py-1 rounded border border-cyber-up/15 text-[10px] md:text-xs animate-pulse">ALTA</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Grade Operacional: Contas, Alocação, Gráfico de Fimathe e Painel de Ordem -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                <!-- Coluna Esquerda: Bybit Multi-Accounts & Alocador Dinâmico -->
+                <div class="space-y-6">
+                    
+                    <!-- Cadastro de Contas Multicontas (Bybit API Key Config) -->
+                    <section class="bg-cyber-card p-4 md:p-5 rounded-2xl border border-cyber-border space-y-4">
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2 font-display">
+                                <i data-lucide="users" class="text-cyber-cyan w-4 h-4"></i> Carteiras de Clientes Bybit
+                            </h2>
+                            <span class="text-[10px] text-cyber-cyan font-bold font-mono bg-cyber-cyan/15 px-2 py-0.5 rounded border border-cyber-cyan/20">AMS Multi-Vault</span>
+                        </div>
+                        <form id="account-form" class="space-y-3 text-xs" onsubmit="registerBybitAccount(event)">
+                            <div>
+                                <label class="text-slate-400 block mb-1">Nome do Cliente / Identificador</label>
+                                <input type="text" id="acc-name" placeholder="Ex: Cliente_Marcos_VIP" class="w-full bg-cyber-bg border border-cyber-border rounded-xl p-2.5 outline-none focus:border-cyber-cyan text-white" required>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="text-slate-400 block mb-1">API Key</label>
+                                    <input type="text" id="acc-key" placeholder="Testnet Key" class="w-full bg-cyber-bg border border-cyber-border rounded-xl p-2.5 outline-none focus:border-cyber-cyan font-mono" required>
+                                </div>
+                                <div>
+                                    <label class="text-slate-400 block mb-1">API Secret</label>
+                                    <input type="password" id="acc-secret" placeholder="Secret Key" class="w-full bg-cyber-bg border border-cyber-border rounded-xl p-2.5 outline-none focus:border-cyber-cyan font-mono" required>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2">
+                                <div>
+                                    <label class="text-slate-400 block mb-1">Banca Inicial</label>
+                                    <input type="number" id="acc-balance" value="50" min="10" step="1" class="w-full bg-cyber-bg border border-cyber-border rounded-xl p-2.5 outline-none focus:border-cyber-cyan text-white font-mono" required>
+                                </div>
+                                <div>
+                                    <label class="text-slate-400 block mb-1">Par Operado</label>
+                                    <select id="acc-pair" class="w-full bg-cyber-bg border border-cyber-border rounded-xl p-2.5 outline-none focus:border-cyber-cyan text-cyber-cyan font-mono font-bold">
+                                        <option value="SOLUSDT">SOL/USDT</option>
+                                        <option value="XRPUSDT">XRP/USDT</option>
+                                        <option value="BTCUSDT">BTC/USDT</option>
+                                        <option value="ETHUSDT">ETH/USDT</option>
+                                        <option value="SOLUSDC">SOL/USDC</option>
+                                        <option value="XRPUSDC">XRP/USDC</option>
+                                        <option value="BTCUSDC">BTC/USDC</option>
+                                        <option value="ETHUSDC">ETH/USDC</option>
+                                        <option value="SOLBRL">SOL/BRL</option>
+                                        <option value="XRPBRL">XRP/BRL</option>
+                                        <option value="BTCBRL">BTC/BRL</option>
+                                        <option value="ETHBRL">ETH/BRL</option>
+                                    </select>
+                                </div>
+                                <div class="flex items-end">
+                                    <button type="submit" class="w-full bg-cyber-cyan hover:bg-cyber-cyan/80 text-cyber-bg font-bold py-2.5 rounded-xl transition-all uppercase tracking-wider text-[10px]">
+                                        Adicionar Conta
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+
+                        <!-- Lista de Chaves Ativas na Sessão -->
+                        <div class="border-t border-cyber-border/60 pt-3 space-y-2 max-h-56 overflow-y-auto" id="bybit-accounts-list">
+                            <!-- Injetado dinamicamente -->
+                            <div class="text-center py-4 text-slate-500 text-xs">Nenhuma conta cadastrada para simulação.</div>
+                        </div>
+                    </section>
+
+                    <!-- Alocador Inteligente e Recomendações de Ativos para Banca Ativa -->
+                    <section class="bg-cyber-card p-4 md:p-5 rounded-2xl border border-cyber-border space-y-4">
+                        <h2 class="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2 font-display">
+                            <i data-lucide="cpu" class="text-cyber-purple w-4 h-4"></i> Alocador Ponderado por Banca
+                        </h2>
+                        
+                        <div class="bg-cyber-bg p-4 rounded-xl border border-cyber-border space-y-3.5 text-xs">
+                            <div class="flex justify-between items-center">
+                                <span class="text-slate-400">Carteira Selecionada (Foco / Simulação):</span>
+                                <span class="font-mono font-extrabold text-cyber-cyan text-sm" id="banca-selecionada-val">$50.00 USD</span>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-slate-400">Lote de Entrada (30% do Caixa):</span>
+                                <span class="font-mono font-bold text-cyber-purple" id="lote-operacional-val">$15.00 USD</span>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 text-[11px]">
+                                <div class="p-2.5 rounded-lg border border-cyber-border bg-cyber-card/50">
+                                    <span class="text-slate-500 block">Patrimônio Total</span>
+                                    <span id="sim-total-equity" class="text-white font-bold font-mono">USDT 150.00</span>
+                                </div>
+                                <div class="p-2.5 rounded-lg border border-cyber-border bg-cyber-card/50">
+                                    <span class="text-slate-500 block">PnL Agregado</span>
+                                    <span id="sim-total-pnl" class="text-cyber-up font-bold font-mono">+USDT 0.00</span>
+                                </div>
+                                <div class="p-2.5 rounded-lg border border-cyber-border bg-cyber-card/50">
+                                    <span class="text-slate-500 block">Trades</span>
+                                    <span id="sim-total-trades" class="text-white font-bold font-mono">0</span>
+                                </div>
+                                <div class="p-2.5 rounded-lg border border-cyber-border bg-cyber-card/50">
+                                    <span class="text-slate-500 block">Win Rate</span>
+                                    <span id="sim-bot-efficiency" class="text-cyber-cyan font-bold font-mono">0.0%</span>
+                                </div>
+                            </div>
+                            <div class="border-t border-cyber-border/40 my-2"></div>
+                            
+                            <div class="space-y-2.5">
+                                <span class="text-slate-400 font-bold block">Ordens Limit Estimadas para Envio:</span>
+                                <div id="suggested-lot-breakdown" class="space-y-2">
+                                    <div class="p-2.5 bg-cyber-card rounded-lg border border-cyber-border flex justify-between items-center">
+                                        <span class="font-bold text-white font-display">SOL/USDT</span>
+                                        <span class="text-slate-400 font-mono">Quant: <strong class="text-cyber-cyan">0.22 SOL</strong> (~$15)</span>
+                                    </div>
+                                    <div class="p-2.5 bg-cyber-card rounded-lg border border-cyber-border flex justify-between items-center">
+                                        <span class="font-bold text-white font-display">XRP/USDT</span>
+                                        <span class="text-slate-400 font-mono">Quant: <strong class="text-cyber-cyan">12.7 XRP</strong> (~$15)</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- Coluna Centro/Direita: Gráfico de Canal Fimathe, Novo Painel de Sinais e Trailing Info -->
+                <div class="lg:col-span-2 space-y-6">
+                    
+                    <!-- Painel Superior: Canal Fimathe -->
+                    <div class="bg-cyber-card p-4 md:p-5 rounded-2xl border border-cyber-border space-y-4">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                                <h3 class="text-sm font-bold text-white flex items-center gap-2 font-display">
+                                    Canal de Referência Fimathe & Linhas de Proteção AMS
+                                </h3>
+                                <p class="text-slate-400 text-xs">Mecanismo dinâmico de trailing stop: Protegendo o pico do lucro de reversões violentas.</p>
+                            </div>
+                            <span class="text-[10px] bg-cyber-up/10 text-cyber-up px-2.5 py-1 rounded border border-cyber-up/20 font-bold uppercase tracking-wider font-mono self-start sm:self-auto">Spread Limit Ótimo</span>
+                        </div>
+
+                        <!-- Gráfico do Canal Fimathe -->
+                        <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border h-64 relative">
+                            <canvas id="fimatheChart"></canvas>
+                        </div>
+
+                        <!-- Indicador Dinâmico de Rompimento de Canal -->
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs font-mono">
+                            <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border">
+                                <span class="text-[10px] text-slate-500 font-bold block">Topo Canal Referência</span>
+                                <span id="fimathe-cr-high" class="text-white font-bold block mt-1">$67.5000</span>
+                            </div>
+                            <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border">
+                                <span class="text-[10px] text-slate-500 font-bold block">Fundo Zona Neutra</span>
+                                <span id="fimathe-zn-low" class="text-white font-bold block mt-1">$67.1000</span>
+                            </div>
+                            <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border">
+                                <span class="text-[10px] text-slate-500 font-bold block">Subciclo Expansão TP</span>
+                                <span id="fimathe-target" class="text-cyber-cyan font-bold block mt-1">$67.7025</span>
+                            </div>
+                            <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border">
+                                <span class="text-[10px] text-slate-500 font-bold block">Nível Limite SL Dinâmico</span>
+                                <span id="fimathe-stop" class="text-cyber-down font-bold block mt-1">$66.8988</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- NOVO CONTAINER: ANÁLISE DE ENTRADAS & SINAIS CONFLUENTES (Semáforo de Risco) -->
+                    <section class="bg-cyber-card p-4 md:p-5 rounded-2xl border border-cyber-border space-y-4">
+                        <div class="flex items-center justify-between border-b border-cyber-border/40 pb-3">
+                            <h3 class="text-sm font-bold text-white flex items-center gap-1.5 font-display">
+                                <i data-lucide="shield-check" class="text-cyber-cyan w-4 h-4"></i> Análise de Entradas & Sinais Confluentes (Top-Down)
+                            </h3>
+                            <span class="text-[9px] text-slate-400 font-mono">Quintuple Strategy Protection</span>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <!-- Semáforo de Risco Visual -->
+                            <div class="bg-cyber-bg p-4 rounded-xl border border-cyber-border flex flex-col items-center justify-center text-center space-y-3">
+                                <span class="text-[10px] text-slate-500 font-bold uppercase block tracking-wider">Status do Robô Spot</span>
+                                <div class="flex gap-3 justify-center items-center py-2">
+                                    <div id="signal-light-red" class="w-6 h-6 rounded-full bg-red-950 transition-all duration-300"></div>
+                                    <div id="signal-light-orange" class="w-6 h-6 rounded-full bg-yellow-950 transition-all duration-300"></div>
+                                    <div id="signal-light-green" class="w-6 h-6 rounded-full bg-emerald-950 transition-all duration-300"></div>
+                                </div>
+                                <span id="signal-badge-text" class="text-xs font-bold text-slate-400 px-3 py-1 rounded bg-cyber-card border border-cyber-border font-mono">VERIFICANDO MERCADO</span>
+                            </div>
+
+                            <!-- Checklist Técnico da Estratégia de Compra -->
+                            <div class="md:col-span-2 bg-cyber-bg p-4 rounded-xl border border-cyber-border space-y-2">
+                                <span class="text-[10px] text-slate-500 font-bold uppercase block tracking-wider">Checklist de Confluência Quíntupla</span>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-mono">
+                                    <div class="flex items-center gap-2 p-1.5 rounded bg-cyber-card/50">
+                                        <span id="chk-ema" class="w-2 h-2 rounded-full bg-slate-600"></span>
+                                        <span class="text-slate-300">Macro Bullish (EMA 200)</span>
+                                    </div>
+                                    <div class="flex items-center gap-2 p-1.5 rounded bg-cyber-card/50">
+                                        <span id="chk-rsi" class="w-2 h-2 rounded-full bg-slate-600"></span>
+                                        <span class="text-slate-300">RSI Sobrevendido / Neutro</span>
+                                    </div>
+                                    <div class="flex items-center gap-2 p-1.5 rounded bg-cyber-card/50">
+                                        <span id="chk-boll" class="w-2 h-2 rounded-full bg-slate-600"></span>
+                                        <span class="text-slate-300">Suporte Bollinger Band</span>
+                                    </div>
+                                    <div class="flex items-center gap-2 p-1.5 rounded bg-cyber-card/50">
+                                        <span id="chk-macd" class="w-2 h-2 rounded-full bg-slate-600"></span>
+                                        <span class="text-slate-300">Histograma MACD Alta</span>
+                                    </div>
+                                    <div class="flex items-center gap-2 p-1.5 rounded bg-cyber-card/50 sm:col-span-2">
+                                        <span id="chk-volume" class="w-2 h-2 rounded-full bg-slate-600"></span>
+                                        <span class="text-slate-300">Volume Spike (>1.5x SMA)</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- Detalhes de Volatilidade e Trailing Stop Information -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Trailing Stop Dinâmico (Explicação Visual) -->
+                        <section class="bg-cyber-card p-5 rounded-2xl border border-cyber-border flex flex-col justify-between space-y-4">
+                            <div>
+                                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 font-display">
+                                    <i data-lucide="shield-alert" class="text-cyber-cyan w-4 h-4"></i> Trailing Retracement (Proteção de Pico)
+                                </h3>
+                                <p class="text-slate-400 text-xs leading-relaxed mt-2" id="trailing-desc">
+                                    Se o mercado disparar e atingir o gatilho, o robô inicia o rastreamento. Se recuar a porcentagem tolerada em relação ao ponto mais alto atingido, a posição é encerrada garantindo o lucro antes da reversão.
+                                </p>
+                            </div>
+                            <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border flex items-center justify-between text-xs font-mono">
+                                <span class="text-slate-500">Status do Trailing:</span>
+                                <span class="text-cyber-up font-bold animate-pulse">Aguardando Gatilho</span>
+                            </div>
+                        </section>
+
+                        <!-- Filtro de Anomalia de Volume (Volume Spike Detector) -->
+                        <section class="bg-cyber-card p-5 rounded-2xl border border-cyber-border flex flex-col justify-between space-y-4">
+                            <div>
+                                <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5 font-display">
+                                    <i data-lucide="trending-up" class="text-cyber-purple w-4 h-4"></i> Volatilidade & Surtos de Volume
+                                </h3>
+                                <p class="text-slate-400 text-xs leading-relaxed mt-2">
+                                    Monitoramos se a força volumétrica do candle supera 1.5x a média de 20 períodos, evitando falsos rompimentos horizontais em dias de baixa liquidez.
+                                </p>
+                            </div>
+                            <div class="bg-cyber-bg p-3 rounded-xl border border-cyber-border flex items-center justify-between text-xs font-mono">
+                                <span class="text-slate-500">Volume vs Média SMA:</span>
+                                <span class="text-cyber-up font-bold" id="vol-ratio-stats">1.82x (Confirmado)</span>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Terminal de Logs da API Bybit Testnet e do Mecanismo de Execução -->
+            <div class="bg-cyber-card rounded-2xl border border-cyber-border overflow-hidden">
+                <div class="bg-cyber-bg/50 px-5 py-3 border-b border-cyber-border flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-400 flex items-center gap-2 font-display">
+                        <i data-lucide="terminal" class="w-4 h-4 text-cyber-cyan"></i> Console do Motor AMS Micro-Scalper
+                    </span>
+                    <button onclick="clearTerminalLogs()" class="text-[10px] text-slate-500 hover:text-slate-300 font-semibold border border-cyber-border px-2.5 py-1 rounded bg-cyber-bg font-sans">Limpar Console</button>
+                </div>
+                <div id="live-terminal-logs" class="p-4 font-mono text-[11px] space-y-1.5 h-48 overflow-y-auto bg-black text-slate-300">
+                    <div><span class="text-slate-500">[16:00:01]</span> <span class="text-cyber-cyan">[AMS CORE]</span> Inicializando AMS. Conectando nos canais de baixa latência da Bybit...</div>
+                    <div><span class="text-slate-500">[16:00:03]</span> <span class="text-cyber-purple">[WEBSOCKET]</span> Escuta ativa em: <code class="text-white">stream-testnet.bybit.com</code></div>
+                    <div><span class="text-slate-500">[16:00:05]</span> <span class="text-cyber-cyan">[SYSTEM]</span> Monitoramento de trailing stop dinâmico ativado para proteção de velas longas.</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= ABA 2: SIMULADOR DE BACKTEST HFT (HFTBACKTEST) ================= -->
+        <section id="tab-backtest" class="space-y-6 hidden">
+            
+            <div class="bg-cyber-card p-4 md:p-6 rounded-2xl border border-cyber-border space-y-6">
+                <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-cyber-border/60 pb-4">
+                    <div>
+                        <h2 class="text-lg font-bold text-cyber-cyan flex items-center gap-2 font-display">
+                            Simulador HftBacktest (Fila do Book de Ofertas & Latência Real)
+                        </h2>
+                        <p class="text-slate-400 text-xs mt-1">Ajuste os alvos do robô para buscar retornos de 0.3% até lucros maiores em velas explosivas.</p>
+                    </div>
+
+                    <div class="flex flex-wrap gap-3 text-xs">
+                        <!-- Período de Dados Restabelecido -->
+                        <div class="flex items-center gap-2 bg-cyber-bg border border-cyber-border rounded-lg px-3 py-2">
+                            <span class="text-slate-400 font-semibold font-sans">Período de Dados:</span>
+                            <select id="bt-period-selector" class="bg-transparent border-none text-cyber-cyan font-bold outline-none cursor-pointer font-mono">
+                                <option value="3m">Últimos 3 Meses</option>
+                                <option value="6m" selected>Últimos 6 Meses</option>
+                                <option value="12m">Últimos 12 Meses</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center gap-2 bg-cyber-bg border border-cyber-border rounded-lg px-3 py-2">
+                            <span class="text-slate-400 font-semibold font-sans">Par de Teste:</span>
+                            <select id="bt-asset-selector" class="bg-transparent border-none text-cyber-cyan font-bold outline-none cursor-pointer font-mono">
+                                <option value="SOLUSDT" class="bg-cyber-card">SOL/USDT</option>
+                                <option value="XRPUSDT" class="bg-cyber-card">XRP/USDT</option>
+                                <option value="BTCUSDT" class="bg-cyber-card">BTC/USDT</option>
+                                <option value="ETHUSDT" class="bg-cyber-card">ETH/USDT</option>
+                                <option value="SOLUSDC" class="bg-cyber-card">SOL/USDC</option>
+                                <option value="XRPUSDC" class="bg-cyber-card">XRP/USDC</option>
+                                <option value="BTCUSDC" class="bg-cyber-card">BTC/USDC</option>
+                                <option value="ETHUSDC" class="bg-cyber-card">ETH/USDC</option>
+                                <option value="SOLBRL" class="bg-cyber-card">SOL/BRL</option>
+                                <option value="XRPBRL" class="bg-cyber-card">XRP/BRL</option>
+                                <option value="BTCBRL" class="bg-cyber-card">BTC/BRL</option>
+                                <option value="ETHBRL" class="bg-cyber-card">ETH/BRL</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center gap-2 bg-cyber-bg border border-cyber-border rounded-lg px-3 py-2">
+                            <span class="text-slate-400 font-semibold font-sans">Latência (ms):</span>
+                            <input type="number" id="bt-latency-val" value="45" class="w-12 bg-transparent text-center text-cyber-purple font-bold outline-none font-mono">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Executador e Configuração Dinâmica de Win/Loss/Trailing -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    
+                    <!-- Painel de Disparo de Backtest com Alvos Editáveis -->
+                    <div class="bg-cyber-bg/40 p-4 md:p-5 rounded-xl border border-cyber-border space-y-4 flex flex-col justify-between">
+                        <div class="space-y-3.5 text-xs">
+                            <span class="text-slate-400 font-bold block uppercase tracking-wider text-[10px]">Ajustes de Win/Loss & Retração:</span>
+                            
+                            <!-- TP Target Input -->
+                            <div class="space-y-1">
+                                <div class="flex justify-between text-slate-400 text-[11px]">
+                                    <span>Alvo Profit Target (%)</span>
+                                    <span class="text-cyber-cyan font-mono" id="val-tp-display">0.3%</span>
+                                </div>
+                                <input type="range" id="bt-input-tp" min="0.2" max="3.0" step="0.1" value="0.3" oninput="updateTargetSliders()" class="w-full h-1 bg-cyber-border rounded-lg appearance-none cursor-pointer accent-cyber-cyan">
+                            </div>
+
+                            <!-- SL Target Input -->
+                            <div class="space-y-1">
+                                <div class="flex justify-between text-slate-400 text-[11px]">
+                                    <span>Stop de Proteção (%)</span>
+                                    <span class="text-cyber-down font-mono" id="val-sl-display">0.3%</span>
+                                </div>
+                                <input type="range" id="bt-input-sl" min="0.2" max="2.0" step="0.1" value="0.3" oninput="updateTargetSliders()" class="w-full h-1 bg-cyber-border rounded-lg appearance-none cursor-pointer accent-cyber-down">
+                            </div>
+
+                            <div class="border-t border-cyber-border/40 my-2"></div>
+
+                            <!-- Trailing Trigger Input -->
+                            <div class="space-y-1">
+                                <div class="flex justify-between text-slate-400 text-[11px]">
+                                    <span>Gatilho de Ativação do Trailing (%)</span>
+                                    <span class="text-cyber-purple font-mono" id="val-trigger-display">1.0%</span>
+                                </div>
+                                <input type="range" id="bt-input-trigger" min="0.5" max="5.0" step="0.1" value="1.0" oninput="updateTargetSliders()" class="w-full h-1 bg-cyber-border rounded-lg appearance-none cursor-pointer accent-cyber-purple">
+                            </div>
+
+                            <!-- Trailing Retracement Tolerance -->
+                            <div class="space-y-1">
+                                <div class="flex justify-between text-slate-400 text-[11px]">
+                                    <span>Tolerância de Retração do Pico (%)</span>
+                                    <span class="text-cyber-warning font-mono" id="val-retracement-display">25%</span>
+                                </div>
+                                <input type="range" id="bt-input-retracement" min="10" max="50" step="5" value="25" oninput="updateTargetSliders()" class="w-full h-1 bg-cyber-border rounded-lg appearance-none cursor-pointer accent-cyber-warning">
+                            </div>
+                        </div>
+
+                        <button onclick="startHftBacktestSim()" id="bt-trigger-btn" class="w-full bg-cyber-purple hover:bg-cyber-purpleDark text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-cyber-purple/15 flex items-center justify-center gap-2 uppercase text-xs tracking-wider">
+                            <i data-lucide="play" class="w-4 h-4"></i> Executar Backtest L2
+                        </button>
+                    </div>
+
+                    <!-- Gráfico de Equity Curve da Frequência HFT -->
+                    <div class="lg:col-span-2 bg-cyber-bg/40 p-4 md:p-5 rounded-xl border border-cyber-border h-72 relative flex flex-col justify-between">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs font-bold text-slate-300 font-display">Curva de Patrimônio Liquida (Retorno sobre Ticks HFT)</span>
+                            <span class="text-[10px] text-cyber-cyan font-mono" id="bt-progress-text">Aguardando Execução</span>
+                        </div>
+                        <div class="flex-grow relative h-52">
+                            <canvas id="backtestChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Painel de Resultados Estatísticos Profissionais (Mapeamento HftBacktest) -->
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                    <div class="bg-cyber-bg p-4 rounded-xl border border-cyber-border text-center">
+                        <span class="text-[10px] text-slate-500 font-bold block">Taxa de Acerto (Win Rate)</span>
+                        <span id="bt-stat-win" class="text-lg font-bold text-cyber-up block mt-1 font-mono">--%</span>
+                    </div>
+                    <div class="bg-cyber-bg p-4 rounded-xl border border-cyber-border text-center">
+                        <span class="text-[10px] text-slate-500 font-bold block">Total de Trades (HFT)</span>
+                        <span id="bt-stat-trades" class="text-lg font-bold text-white block mt-1 font-mono">--</span>
+                    </div>
+                    <div class="bg-cyber-bg p-4 rounded-xl border border-cyber-border text-center">
+                        <span class="text-[10px] text-slate-500 font-bold block">Fator de Lucro</span>
+                        <span id="bt-stat-pf" class="text-lg font-bold text-cyber-cyan block mt-1 font-mono">--</span>
+                    </div>
+                    <div class="bg-cyber-bg p-4 rounded-xl border border-cyber-border text-center">
+                        <span class="text-[10px] text-slate-500 font-bold block">Max Drawdown (Hist)</span>
+                        <span id="bt-stat-mdd" class="text-lg font-bold text-cyber-down block mt-1 font-mono">--%</span>
+                    </div>
+                    <div class="bg-cyber-bg p-4 rounded-xl border border-cyber-border text-center">
+                        <span class="text-[10px] text-slate-500 font-bold block">Taxas Salvas (Maker Effect)</span>
+                        <span id="bt-stat-fees" class="text-lg font-bold text-cyber-warning block mt-1 font-mono">$--</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================= ABA 3: COPILOT IA & ANÁLISE DE CONFLUÊNCIAS ================= -->
+        <section id="tab-copilot" class="space-y-6 hidden">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                <!-- Informações e Dicas de Academia e Estratégia de Apoio -->
+                <div class="bg-cyber-card p-4 md:p-6 rounded-2xl border border-cyber-border space-y-6">
+                    <div>
+                        <h2 class="text-lg font-bold text-white flex items-center gap-2 font-display">
+                            <i data-lucide="graduation-cap" class="text-cyber-purple w-5 h-5"></i> AMS Training Center
+                        </h2>
+                        <p class="text-slate-400 text-xs mt-1">Treinamento avançado de escalabilidade de carteiras. Saiba como configurar e expandir contas micro com segurança.</p>
+                    </div>
+
+                    <div class="space-y-3.5 text-xs">
+                        <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider">Metodologia Trailing Stop Dinâmico:</h3>
+                        <div class="p-3 bg-cyber-bg rounded-xl border border-cyber-border space-y-1.5 leading-relaxed">
+                            <span class="font-bold text-cyber-cyan block flex items-center gap-1">
+                                <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i> 1. Gatilho de Ativação
+                            </span>
+                            <p class="text-slate-400 text-[11px]">Se o preço ultrapassar o valor parametrizado (ex: +1%), o Trailing Stop do AMS é armado e trava o breakeven para taxa zero de risco financeiro.</p>
+                        </div>
+                        <div class="p-3 bg-cyber-bg rounded-xl border border-cyber-border space-y-1.5 leading-relaxed">
+                            <span class="font-bold text-cyber-purple block flex items-center gap-1">
+                                <i data-lucide="check-circle-2" class="w-3.5 h-3.5"></i> 2. Retração do Pico
+                            </span>
+                            <p class="text-slate-400 text-[11px]">Caso o preço suba de forma exponencial e depois sofra uma retração abrupta equivalente a 25% da alta, o robô encerra a operação no lucro máximo local.</p>
+                        </div>
+                    </div>
+
+                    <!-- Botões rápidos de treinamento de IA -->
+                    <div class="space-y-2">
+                        <span class="text-slate-500 font-bold text-[10px] uppercase block tracking-wider">Perguntas Rápidas sobre o AMS:</span>
+                        <div class="grid grid-cols-1 gap-2 text-xs">
+                            <button onclick="sendQuestionToCopilot('Como configurar o Trailing Retracement do AMS para capturar velas de 3% a 5% sem perder lucros em caso de queda rápida?')" class="text-left p-2.5 rounded-lg border border-cyber-border hover:border-cyber-purple bg-cyber-bg text-slate-300 hover:text-white transition-all font-semibold">
+                                🔑 Protegendo lucros em velas gigantes
+                            </button>
+                            <button onclick="sendQuestionToCopilot('Qual a melhor alocação de banca para gerenciar 5 contas de clientes de $50 USDT simultaneamente sem sofrer com drawdown generalizado?')" class="text-left p-2.5 rounded-lg border border-cyber-border hover:border-cyber-purple bg-cyber-bg text-slate-300 hover:text-white transition-all font-semibold">
+                                📊 Gerenciamento de Banca Multicontas
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chat Box com Copilot Gemini -->
+                <div class="lg:col-span-2 bg-cyber-card p-4 md:p-6 rounded-2xl border border-cyber-border flex flex-col justify-between h-[520px]">
+                    <div class="flex items-center justify-between border-b border-cyber-border pb-4">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 rounded-full bg-cyber-purple/20 border border-cyber-purple/40 flex items-center justify-center">
+                                <i data-lucide="bot" class="w-4 h-4 text-cyber-purple"></i>
+                            </div>
+                            <div>
+                                <span class="font-bold text-white block text-sm font-display">Aegis AI Copilot</span>
+                                <span class="text-[10px] text-slate-500 font-mono">Gemini 2.5 Flash Engine</span>
+                            </div>
+                        </div>
+                        <button onclick="clearChatMessages()" class="text-[10px] text-slate-500 hover:text-slate-300 border border-cyber-border px-2.5 py-1 rounded bg-cyber-bg font-sans">Limpar Chat</button>
+                    </div>
+
+                    <!-- Mensagens do Chat -->
+                    <div id="chat-messages" class="flex-grow my-4 overflow-y-auto space-y-4 pr-1 text-xs">
+                        <div class="flex gap-2.5">
+                            <div class="w-6 h-6 rounded-full bg-cyber-purple flex items-center justify-center text-[10px] font-bold shrink-0">AI</div>
+                            <div class="bg-cyber-bg p-3.5 rounded-2xl border border-cyber-border text-slate-300 leading-relaxed max-w-[85%]">
+                                Olá! Sou o assistente de inteligência artificial do **AMS (Aegis Micro-Scalper)**. Estou pronto para te ajudar a programar subciclos Fimathe, gerenciar drawdown de clientes e configurar a proteção de Trailing Stop dinâmico. O que deseja saber?
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Caixa de Entrada de Texto -->
+                    <div class="flex gap-2 border-t border-cyber-border/60 pt-4">
+                        <input type="text" id="chat-user-input" onkeydown="handleChatInputKey(event)" placeholder="Digite sua dúvida de infraestrutura de HFT, Bybit ou canais de trading..." class="flex-grow bg-cyber-bg border border-cyber-border focus:border-cyber-purple rounded-xl py-3 px-4 text-xs outline-none text-slate-300 transition-colors">
+                        <button onclick="sendMessageToCopilot()" class="bg-cyber-purple hover:bg-cyber-purpleDark text-white px-5 rounded-xl text-xs font-bold transition-all shadow-lg shadow-cyber-purple/15 flex items-center gap-1.5 uppercase">
+                            Enviar <i data-lucide="send" class="w-3.5 h-3.5"></i>
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- ================= ABA 4: CÓDIGOS DE PRODUÇÃO PYTHON ================= -->
+        <section id="tab-code" class="space-y-6 hidden">
+            <div class="bg-cyber-card p-4 md:p-6 rounded-2xl border border-cyber-border space-y-4">
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <h2 class="text-base font-bold text-white flex items-center gap-2 font-display">
+                            Código do Motor Quântico Aegis & Simulação HftBacktest
+                        </h2>
+                        <p class="text-slate-400 text-xs">Utilize o script de produção assíncrona ou o runner profissional de backtest ticks para rodar os testes de 3 a 12 meses localmente.</p>
+                    </div>
+                    <button onclick="copyActiveCodeToClipboard()" class="bg-cyber-cyan hover:bg-cyber-cyanDark text-cyber-bg px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-lg shadow-cyber-cyan/15 uppercase tracking-wider">
+                        <i data-lucide="copy" class="w-4 h-4"></i> Copiar Código Ativo
+                    </button>
+                </div>
+
+                <!-- Seletor de Arquivo do Vault -->
+                <div class="flex gap-2 bg-cyber-bg p-1 rounded-lg border border-cyber-border self-start text-xs max-w-max font-mono">
+                    <button id="code-btn-live" onclick="switchCodeFile('live')" class="bg-cyber-card text-cyber-cyan border border-cyber-cyan/20 px-3 py-1.5 rounded font-bold transition-colors">aegis_bybit_bot.py</button>
+                    <button id="code-btn-hft" onclick="switchCodeFile('hft')" class="text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded font-bold transition-colors">hft_backtest_runner.py</button>
+                </div>
+
+                <!-- Painel de Código Escrito -->
+                <div class="relative rounded-xl overflow-hidden border border-cyber-border bg-black">
+                    <div class="bg-cyber-bg/80 px-4 py-2 border-b border-cyber-border text-xs text-slate-400 flex items-center justify-between font-mono">
+                        <span id="code-display-filename">aegis_bybit_bot.py</span>
+                        <span class="text-[10px] bg-cyber-purple/15 text-cyber-purple px-2.5 py-0.5 rounded font-bold">Produção</span>
+                    </div>
+                    <pre class="p-5 font-mono text-xs text-slate-300 overflow-x-auto max-h-[460px]"><code id="code-display-block"># O código será inserido aqui dinamicamente</code></pre>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Modal de Configuração de Cliente (BANCA & LIMITES WIN/LOSS) -->
+    <div id="client-modal" class="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-cyber-card border border-cyber-border p-5 md:p-6 rounded-2xl w-full max-w-md space-y-4 glow-cyan">
+            <div class="flex justify-between items-center border-b border-cyber-border pb-3">
+                <h3 class="text-sm font-bold text-white flex items-center gap-2 font-display">
+                    <i data-lucide="settings" class="text-cyber-cyan w-4 h-4"></i> Ajustar Conta de Cliente
+                </h3>
+                <button onclick="closeClientModal()" class="text-slate-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+            </div>
+            
+            <div class="space-y-3.5 text-xs">
+                <input type="hidden" id="modal-client-id">
+                
+                <div>
+                    <label class="text-slate-400 block mb-1 font-semibold">Identificador do Cliente</label>
+                    <input type="text" id="modal-client-name" class="w-full bg-cyber-bg border border-cyber-border rounded-xl p-2.5 outline-none focus:border-cyber-cyan text-white font-semibold">
+                </div>
+
+                <div>
+                    <label class="text-slate-400 block mb-1 font-semibold">Banca Ativa (USDT)</label>
+                    <input type="number" id="modal-client-balance" class="w-full bg-cyber-bg border border-cyber-border rounded-xl p-2.5 outline-none focus:border-cyber-cyan text-white font-mono font-bold">
+                </div>
+
+                <div>
+                    <label class="text-slate-400 block mb-1 font-semibold">Par Prioritário</label>
+                    <select id="modal-client-pair" class="w-full bg-cyber-bg border border-cyber-border rounded-xl p-2.5 outline-none focus:border-cyber-cyan text-cyber-cyan font-mono font-bold">
+                        <option value="SOLUSDT">SOL/USDT</option>
+                        <option value="XRPUSDT">XRP/USDT</option>
+                        <option value="BTCUSDT">BTC/USDT</option>
+                        <option value="ETHUSDT">ETH/USDT</option>
+                        <option value="SOLUSDC">SOL/USDC</option>
+                        <option value="XRPUSDC">XRP/USDC</option>
+                        <option value="BTCUSDC">BTC/USDC</option>
+                        <option value="ETHUSDC">ETH/USDC</option>
+                        <option value="SOLBRL">SOL/BRL</option>
+                        <option value="XRPBRL">XRP/BRL</option>
+                        <option value="BTCBRL">BTC/BRL</option>
+                        <option value="ETHBRL">ETH/BRL</option>
+                    </select>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-slate-400 block mb-1 font-semibold">Alvo Win (Profit %)</label>
+                        <input type="number" id="modal-client-tp" step="0.05" class="w-full bg-cyber-bg border border-cyber-border rounded-xl p-2.5 outline-none focus:border-cyber-cyan text-white font-mono">
+                    </div>
+                    <div>
+                        <label class="text-slate-400 block mb-1 font-semibold">Limite Loss (Stop %)</label>
+                        <input type="number" id="modal-client-sl" step="0.05" class="w-full bg-cyber-bg border border-cyber-border rounded-xl p-2.5 outline-none focus:border-cyber-cyan text-white font-mono">
+                    </div>
+                </div>
+            </div>
+
+            <div class="pt-2 flex gap-3">
+                <button onclick="closeClientModal()" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition-all">Cancelar</button>
+                <button onclick="saveClientModalChanges()" class="flex-1 bg-cyber-cyan hover:bg-cyber-cyan/80 text-cyber-bg font-bold py-2.5 rounded-xl text-xs uppercase tracking-wider transition-all">Confirmar Ajuste</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="border-t border-cyber-border bg-cyber-card/30 py-6 px-6 text-center text-slate-500 text-xs mt-auto font-mono">
+        <p>© 2026 AMS Suite - Alta Frequência & Confluência Algorítmica Adaptativa. Projetado para Bybit Testnet & HftBacktest.</p>
+    </footer>
+
+    <!-- Toast de Notificações -->
+    <div id="custom-toast" class="fixed bottom-6 right-6 bg-cyber-card border border-cyber-cyan/30 text-slate-100 px-4 py-3 rounded-xl shadow-2xl shadow-cyber-cyan/10 translate-y-20 opacity-0 transition-all duration-300 z-50 flex items-center gap-3">
+        <i data-lucide="info" class="w-5 h-5 text-cyber-cyan" id="toast-icon"></i>
+        <span id="toast-msg" class="text-xs font-semibold font-mono">Ação executada com sucesso!</span>
+    </div>
+
+    <script>
+        window.AMS_RUNTIME_CONFIG = window.AMS_RUNTIME_CONFIG || {};
+    </script>
+    <script type="module" src="./src/app/init.js?v=20260614"></script>
+</body>
+</html>
