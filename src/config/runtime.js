@@ -1,4 +1,7 @@
 export const runtimeConfig = {
+    appEnv: window.AMS_RUNTIME_CONFIG?.APP_ENV || "dev",
+    panelAccessMode: window.AMS_RUNTIME_CONFIG?.PANEL_ACCESS_MODE || "restricted",
+    panelUrl: window.AMS_RUNTIME_CONFIG?.PANEL_URL || "",
     geminiApiKey: window.AMS_RUNTIME_CONFIG?.GEMINI_API_KEY || "",
     supabaseUrl: window.AMS_RUNTIME_CONFIG?.SUPABASE_URL || "",
     supabasePublishableKey: window.AMS_RUNTIME_CONFIG?.SUPABASE_PUBLISHABLE_KEY || "",

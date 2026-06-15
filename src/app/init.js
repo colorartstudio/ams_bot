@@ -28,7 +28,7 @@ import {
     stopWebSocketPriceMock
 } from "../features/dashboard.js";
 import { initializeAuthFlow, signInOperator, signOutOperator } from "../features/auth.js";
-import { loadRuntimeConfig } from "../config/runtime.js";
+import { loadRuntimeConfig, runtimeConfig } from "../config/runtime.js";
 import { renderFimatheChart } from "../services/charts.js";
 import { hydrateAppState, persistAppState } from "../services/storage.js";
 import { clearTerminalLogs, refreshIcons } from "../ui/feedback.js";
@@ -89,6 +89,37 @@ function stopProtectedRuntime() {
     runtimeStarted = false;
 }
 
+function enforceRestrictedPanelRuntime() {
+    if (runtimeConfig.panelAccessMode !== "restricted") {
+        return true;
+    }
+
+    const loginError = document.getElementById("auth-login-error");
+    const submitButton = document.getElementById("auth-submit-btn");
+
+    if (window.location.protocol === "file:") {
+        if (loginError) {
+            loginError.innerText = "Painel restrito bloqueado em file://. Use a URL HTTPS publicada no Vercel.";
+        }
+        if (submitButton) {
+            submitButton.disabled = true;
+            submitButton.innerText = "ACESSO BLOQUEADO";
+        }
+        return false;
+    }
+
+    if (runtimeConfig.panelUrl && !runtimeConfig.panelUrl.includes("your-")) {
+        const expectedOrigin = new URL(runtimeConfig.panelUrl).origin;
+        if (window.location.origin !== expectedOrigin && runtimeConfig.appEnv === "prod") {
+            if (loginError) {
+                loginError.innerText = `Origem não prevista para produção. Use ${expectedOrigin}.`;
+            }
+        }
+    }
+
+    return true;
+}
+
 async function bootstrap() {
     await loadRuntimeConfig();
     hydrateAppState();
@@ -105,6 +136,10 @@ async function bootstrap() {
     updateTargetSliders();
     updateCodeViewer();
     refreshIcons();
+
+    if (!enforceRestrictedPanelRuntime()) {
+        return;
+    }
 
     await initializeAuthFlow({
         onAuthenticated: async () => {

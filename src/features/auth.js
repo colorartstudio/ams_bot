@@ -11,6 +11,14 @@ let authCallbacks = {
     onSignedOut: async () => {}
 };
 
+function getEmptyAuthPayload() {
+    return {
+        session: null,
+        user: null,
+        profile: null
+    };
+}
+
 function setText(id, value) {
     const element = document.getElementById(id);
     if (element) {
@@ -100,6 +108,60 @@ function updateAuthUi() {
     setText("operator-role-label", role);
 }
 
+function applyBlockingAuthError(message) {
+    applyAuthState("error", {
+        ...getEmptyAuthPayload(),
+        lastError: message
+    });
+    updateAuthUi();
+}
+
+function isRestrictedPanel() {
+    return runtimeConfig.panelAccessMode === "restricted";
+}
+
+async function readErrorBody(response) {
+    const contentType = response.headers.get("content-type") || "";
+    try {
+        if (contentType.includes("application/json")) {
+            const payload = await response.json();
+            return payload?.error || payload?.message || "";
+        }
+
+        return await response.text();
+    } catch {
+        return "";
+    }
+}
+
+async function invokeEdgeFunction(functionName, payload, accessToken = "") {
+    if (!runtimeConfig.supabaseUrl || !runtimeConfig.supabaseAnonKey) {
+        throw new Error("Configuração pública do Supabase ausente no runtime.");
+    }
+
+    const headers = {
+        "Content-Type": "application/json",
+        apikey: runtimeConfig.supabaseAnonKey
+    };
+
+    if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+    }
+
+    const response = await fetch(`${runtimeConfig.supabaseUrl}/functions/v1/${functionName}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        const errorBody = await readErrorBody(response);
+        throw new Error(errorBody || `Falha na função ${functionName} (${response.status}).`);
+    }
+
+    return response.json();
+}
+
 async function postAuditEvent(payload, accessToken = "") {
     if (!runtimeConfig.supabaseUrl || !runtimeConfig.supabaseAnonKey) {
         return;
@@ -115,36 +177,49 @@ async function postAuditEvent(payload, accessToken = "") {
     }
 
     try {
-        await fetch(`${runtimeConfig.supabaseUrl}/functions/v1/audit-client-event`, {
+        const response = await fetch(`${runtimeConfig.supabaseUrl}/functions/v1/audit-client-event`, {
             method: "POST",
             headers,
             body: JSON.stringify(payload)
         });
+
+        if (!response.ok) {
+            throw new Error(await readErrorBody(response));
+        }
     } catch {}
 }
 
-async function loadOperatorContext() {
+async function loadOperatorContext(session) {
+    if (!session?.access_token) {
+        throw new Error("Sessão do operador ausente.");
+    }
+
+    const data = await invokeEdgeFunction("read-operator-context", {
+        network: state.currentNetwork,
+        currentAsset: state.currentAsset,
+        origin: "web-auth",
+        originContext: "session-bootstrap",
+        requestId: crypto.randomUUID()
+    }, session.access_token);
+
+    if (!data?.ok) {
+        throw new Error(data?.error || "Falha ao carregar contexto do operador.");
+    }
+
+    state.auth.profile = data.profile || null;
+    applyOperatorAccounts(data.accounts || []);
+}
+
+async function handleAuthBootstrapFailure(message) {
     const supabase = getSupabaseClient();
-    if (!supabase) {
-        throw new Error("Supabase não configurado para autenticação.");
+    if (supabase && state.auth.session) {
+        try {
+            await supabase.auth.signOut();
+        } catch {}
     }
 
-    const { data, error } = await supabase.functions.invoke("read-operator-context", {
-        body: {
-            network: state.currentNetwork,
-            currentAsset: state.currentAsset,
-            origin: "web-auth",
-            originContext: "session-bootstrap",
-            requestId: crypto.randomUUID()
-        }
-    });
-
-    if (error) {
-        throw error;
-    }
-
-    state.auth.profile = data?.profile || null;
-    applyOperatorAccounts(data?.accounts || []);
+    applyBlockingAuthError(message);
+    showToast(message, "error");
 }
 
 async function handleAuthenticatedSession(session) {
@@ -155,8 +230,9 @@ async function handleAuthenticatedSession(session) {
         user: session?.user || null,
         lastError: ""
     });
-    await loadOperatorContext();
+    await loadOperatorContext(session);
     updateAuthUi();
+    showToast("Operador autenticado com sucesso.", "success");
     await authCallbacks.onAuthenticated();
 }
 
@@ -186,27 +262,32 @@ export async function initializeAuthFlow(callbacks = {}) {
 
     const supabase = getSupabaseClient();
     if (!supabase) {
-        applyAuthState("error", {
-            lastError: "Configuração pública do Supabase ausente no runtime."
-        });
-        updateAuthUi();
+        applyBlockingAuthError("Configuração pública do Supabase ausente no runtime.");
         return;
     }
 
-    const { data } = await supabase.auth.getSession();
-    if (data.session) {
-        await handleAuthenticatedSession(data.session);
-    } else {
-        await handleSignedOutState();
+    try {
+        const { data } = await supabase.auth.getSession();
+        if (data.session) {
+            await handleAuthenticatedSession(data.session);
+        } else {
+            await handleSignedOutState();
+        }
+    } catch (error) {
+        await handleAuthBootstrapFailure(error instanceof Error ? error.message : "Falha ao inicializar o painel restrito.");
     }
 
     supabase.auth.onAuthStateChange(async (event, session) => {
-        if (event === "SIGNED_OUT" || !session) {
-            await handleSignedOutState();
-            return;
-        }
+        try {
+            if (event === "SIGNED_OUT" || !session) {
+                await handleSignedOutState();
+                return;
+            }
 
-        await handleAuthenticatedSession(session);
+            await handleAuthenticatedSession(session);
+        } catch (error) {
+            await handleAuthBootstrapFailure(error instanceof Error ? error.message : "Falha ao validar o operador.");
+        }
     });
 }
 
@@ -216,6 +297,11 @@ export async function signInOperator(event) {
     const email = document.getElementById("auth-email")?.value.trim() || "";
     const password = document.getElementById("auth-password")?.value || "";
     const supabase = getSupabaseClient();
+
+    if (isRestrictedPanel() && window.location.protocol === "file:") {
+        applyBlockingAuthError("Painel restrito indisponível em file://. Use a URL HTTPS publicada no Vercel.");
+        return;
+    }
 
     if (!email || !password || !supabase) {
         return;
@@ -271,7 +357,6 @@ export async function signInOperator(event) {
             userId: data.user?.id || null
         }
     }, data.session.access_token);
-    showToast("Operador autenticado com sucesso.", "success");
 }
 
 export async function signOutOperator() {

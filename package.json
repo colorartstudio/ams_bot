@@ -1,0 +1,11 @@
+{
+  "name": "ams-runtime-tools",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "runtime:build": "node ./scripts/generate-runtime-config.mjs auto",
+    "runtime:dev": "node ./scripts/generate-runtime-config.mjs dev",
+    "runtime:test": "node ./scripts/generate-runtime-config.mjs test",
+    "runtime:prod": "node ./scripts/generate-runtime-config.mjs prod"
+  }
+}
